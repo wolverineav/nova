@@ -596,29 +596,6 @@ class LibvirtGenericVIFDriver(object):
         """
         self._plug_bridge_with_port(instance, vif, port='ovs')
 
-    def plug_ivs_ethernet(self, instance, vif):
-        iface_id = self.get_ovs_interfaceid(vif)
-        dev = self.get_vif_devname(vif)
-        linux_net.create_tap_dev(dev)
-        linux_net.create_ivs_vif_port(dev, iface_id, vif['address'],
-                                      instance.uuid)
-
-    def plug_ivs_hybrid(self, instance, vif):
-        """Plug using hybrid strategy (same as OVS)
-
-        Create a per-VIF linux bridge, then link that bridge to the OVS
-        integration bridge via a veth device, setting up the other end
-        of the veth device just like a normal IVS port.  Then boot the
-        VIF on the linux bridge using standard libvirt mechanisms.
-        """
-        self._plug_bridge_with_port(instance, vif, port='ivs')
-
-    def plug_ivs(self, instance, vif):
-        if self.get_firewall_required(vif) or vif.is_hybrid_plug_enabled():
-            self.plug_ivs_hybrid(instance, vif)
-        else:
-            self.plug_ivs_ethernet(instance, vif)
-
     def plug_ib_hostdev(self, instance, vif):
         fabric = vif.get_physical_network()
         if not fabric:
@@ -818,39 +795,6 @@ class LibvirtGenericVIFDriver(object):
         except processutils.ProcessExecutionError:
             LOG.exception(_LE("Failed while unplugging vif"),
                           instance=instance)
-
-    def unplug_ivs_ethernet(self, instance, vif):
-        """Unplug the VIF by deleting the port from the bridge."""
-        try:
-            linux_net.delete_ivs_vif_port(self.get_vif_devname(vif))
-        except processutils.ProcessExecutionError:
-            LOG.exception(_LE("Failed while unplugging vif"),
-                          instance=instance)
-
-    def unplug_ivs_hybrid(self, instance, vif):
-        """UnPlug using hybrid strategy (same as OVS)
-
-        Unhook port from IVS, unhook port from bridge, delete
-        bridge, and delete both veth devices.
-        """
-        try:
-            br_name = self.get_br_name(vif['id'])
-            v1_name, v2_name = self.get_veth_pair_names(vif['id'])
-
-            utils.execute('brctl', 'delif', br_name, v1_name, run_as_root=True)
-            utils.execute('ip', 'link', 'set', br_name, 'down',
-                          run_as_root=True)
-            utils.execute('brctl', 'delbr', br_name, run_as_root=True)
-            linux_net.delete_ivs_vif_port(v2_name)
-        except processutils.ProcessExecutionError:
-            LOG.exception(_LE("Failed while unplugging vif"),
-                          instance=instance)
-
-    def unplug_ivs(self, instance, vif):
-        if self.get_firewall_required(vif) or vif.is_hybrid_plug_enabled():
-            self.unplug_ivs_hybrid(instance, vif)
-        else:
-            self.unplug_ivs_ethernet(instance, vif)
 
     def unplug_ib_hostdev(self, instance, vif):
         fabric = vif.get_physical_network()
