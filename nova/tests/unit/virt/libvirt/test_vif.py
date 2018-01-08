@@ -98,13 +98,6 @@ class LibvirtVifTestCase(test.NoDBTestCase):
         bridge_interface=None,
         vlan=99, mtu=1000)
 
-    network_ivs = network_model.Network(id='network-id-xxx-yyy-zzz',
-        bridge='br0',
-        label=None,
-        subnets=[subnet_bridge_4, subnet_bridge_6],
-        bridge_interface=None,
-        vlan=99)
-
     vif_agilio_ovs = network_model.VIF(id='vif-xxx-yyy-zzz',
         address='ca:fe:de:ad:be:ef',
         network=network_ovs,
@@ -165,38 +158,6 @@ class LibvirtVifTestCase(test.NoDBTestCase):
         type=None,
         devname=None,
         ovs_interfaceid=None)
-
-    vif_ivs = network_model.VIF(id='vif-xxx-yyy-zzz',
-        address='ca:fe:de:ad:be:ef',
-        network=network_ivs,
-        type=network_model.VIF_TYPE_IVS,
-        devname='tap-xxx-yyy-zzz',
-        ovs_interfaceid='aaa-bbb-ccc')
-
-    vif_ivs_filter_cap = network_model.VIF(id='vif-xxx-yyy-zzz',
-        address='ca:fe:de:ad:be:ef',
-        network=network_ivs,
-        type=network_model.VIF_TYPE_IVS,
-        details={'port_filter': True},
-        devname='tap-xxx-yyy-zzz',
-        ovs_interfaceid='aaa-bbb-ccc')
-
-    vif_ivs_hybrid = network_model.VIF(id='vif-xxx-yyy-zzz',
-        address='ca:fe:de:ad:be:ef',
-        network=network_ivs,
-        type=network_model.VIF_TYPE_IVS,
-        details={
-            'port_filter': True,
-            'ovs_hybrid_plug': True},
-        devname='tap-xxx-yyy-zzz',
-        ovs_interfaceid='aaa-bbb-ccc')
-
-    vif_ivs_legacy = network_model.VIF(id='vif-xxx-yyy-zzz',
-        address='ca:fe:de:ad:be:ef',
-        network=network_ovs,
-        type=None,
-        devname=None,
-        ovs_interfaceid='aaa')
 
     vif_none = network_model.VIF(id='vif-xxx-yyy-zzz',
         address='ca:fe:de:ad:be:ef',
@@ -857,7 +818,6 @@ class LibvirtVifTestCase(test.NoDBTestCase):
         self._test_model_qemu(
             self.vif_bridge,
             self.vif_ovs,
-            self.vif_ivs,
             self.vif_8021qbg,
             self.vif_iovisor
         )
@@ -889,25 +849,6 @@ class LibvirtVifTestCase(test.NoDBTestCase):
         self._check_bridge_driver(d,
                                   self.vif_bridge,
                                   self.vif_bridge['network']['bridge'])
-
-    def _check_ivs_ethernet_driver(self, d, vif, dev_prefix):
-        self.flags(firewall_driver="nova.virt.firewall.NoopFirewallDriver")
-        xml = self._get_instance_xml(d, vif)
-        node = self._get_node(xml)
-        self._assertTypeAndMacEquals(node, "ethernet", "target", "dev",
-                                     self.vif_ivs, prefix=dev_prefix)
-        script = node.find("script")
-        self.assertIsNone(script)
-
-    @mock.patch('nova.privsep.libvirt.bridge_delete_interface')
-    @mock.patch('nova.privsep.libvirt.toggle_interface')
-    @mock.patch('nova.privsep.libvirt.delete_bridge')
-    def test_unplug_ivs_ethernet(self, delete_bridge, toggle_interface,
-                                 bridge_delete_interface):
-        d = vif.LibvirtGenericVIFDriver()
-        with mock.patch.object(linux_net, 'delete_ivs_vif_port') as delete:
-            delete.side_effect = processutils.ProcessExecutionError
-            d.unplug(self.instance, self.vif_ivs)
 
     @mock.patch.object(utils, 'execute')
     @mock.patch.object(pci_utils, 'get_ifname_by_pci_address')
@@ -951,74 +892,6 @@ class LibvirtVifTestCase(test.NoDBTestCase):
     def test_unplug_hw_veb(self):
         d = vif.LibvirtGenericVIFDriver()
         self._test_hw_veb_op(d.unplug, 0)
-
-    def test_plug_ivs_hybrid(self):
-        with test.nested(
-                mock.patch.object(linux_net, 'device_exists',
-                                  return_value=False),
-                mock.patch.object(linux_net, '_create_veth_pair'),
-                mock.patch.object(linux_net, 'create_ivs_vif_port'),
-                mock.patch.object(os.path, 'exists', return_value=True),
-                mock.patch('nova.privsep.libvirt.disable_multicast_snooping'),
-                mock.patch('nova.privsep.libvirt.disable_ipv6'),
-                mock.patch('nova.privsep.libvirt.add_bridge'),
-                mock.patch('nova.privsep.libvirt.zero_bridge_forward_delay'),
-                mock.patch('nova.privsep.libvirt.disable_bridge_stp'),
-                mock.patch('nova.privsep.libvirt.toggle_interface'),
-                mock.patch('nova.privsep.libvirt.bridge_add_interface')
-        ) as (device_exists, _create_veth_pair, create_ivs_vif_port,
-              path_exists, disable_multicast_snooping, disable_ipv6,
-              add_bridge, zero_bridge_forward_delay, disable_bridge_stp,
-              toggle_interface, bridge_add_interface):
-            d = vif.LibvirtGenericVIFDriver()
-            d.plug(self.instance, self.vif_ivs)
-
-            device_exists.assert_has_calls([mock.call('qbrvif-xxx-yyy'),
-                                            mock.call('qvovif-xxx-yyy')])
-            _create_veth_pair.assert_has_calls(
-                [mock.call('qvbvif-xxx-yyy', 'qvovif-xxx-yyy', None)])
-            create_ivs_vif_port.assert_has_calls(
-                [mock.call('qvovif-xxx-yyy', 'aaa-bbb-ccc',
-                           'ca:fe:de:ad:be:ef',
-                           'f0000000-0000-0000-0000-000000000001')])
-
-            disable_multicast_snooping.assert_has_calls(
-                [mock.call('qbrvif-xxx-yyy')])
-            disable_ipv6.assert_has_calls([mock.call('qbrvif-xxx-yyy')])
-            add_bridge.assert_has_calls([mock.call('qbrvif-xxx-yyy')])
-            zero_bridge_forward_delay.assert_has_calls(
-                [mock.call('qbrvif-xxx-yyy')])
-            disable_bridge_stp.assert_has_calls([mock.call('qbrvif-xxx-yyy')])
-            toggle_interface.assert_has_calls(
-                [mock.call('qbrvif-xxx-yyy', 'up')])
-            bridge_add_interface.assert_has_calls(
-                [mock.call('qbrvif-xxx-yyy', 'qvbvif-xxx-yyy')])
-
-    def test_unplug_ivs_hybrid(self):
-        with test.nested(
-                mock.patch.object(utils, 'execute'),
-                mock.patch.object(linux_net, 'delete_ivs_vif_port'),
-                mock.patch('nova.privsep.libvirt.bridge_delete_interface'),
-                mock.patch('nova.privsep.libvirt.toggle_interface'),
-                mock.patch('nova.privsep.libvirt.delete_bridge')
-        ) as (execute, delete_ivs_vif_port, bridge_delete_interface,
-              toggle_interface, delete_bridge):
-            d = vif.LibvirtGenericVIFDriver()
-            d.unplug(self.instance, self.vif_ivs)
-
-            delete_ivs_vif_port.assert_has_calls([mock.call('qvovif-xxx-yyy')])
-
-            bridge_delete_interface.assert_has_calls(
-                [mock.call('qbrvif-xxx-yyy', 'qvbvif-xxx-yyy')])
-            toggle_interface.assert_has_calls(
-                [mock.call('qbrvif-xxx-yyy', 'down')])
-            delete_bridge.assert_has_calls([mock.call('qbrvif-xxx-yyy')])
-
-    @mock.patch('nova.privsep.libvirt.bridge_delete_interface',
-                side_effect=processutils.ProcessExecutionError)
-    def test_unplug_ivs_hybrid_bridge_does_not_exist(self, bdi):
-        d = vif.LibvirtGenericVIFDriver()
-        d.unplug(self.instance, self.vif_ivs)
 
     @mock.patch('nova.privsep.libvirt.unplug_plumgrid_vif',
                 side_effect=processutils.ProcessExecutionError)
@@ -1084,19 +957,6 @@ class LibvirtVifTestCase(test.NoDBTestCase):
         mock_plug_contrail.assert_called_once_with(
             instance, self.vif_vrouter, '0.0.0.0', None, 'NovaVMPort')
 
-    def test_ivs_ethernet_driver(self):
-        d = vif.LibvirtGenericVIFDriver()
-        self._check_ivs_ethernet_driver(d,
-                                        self.vif_ivs,
-                                        "tap")
-
-    def _check_ivs_virtualport_driver(self, d, vif, want_iface_id):
-        self.flags(firewall_driver="nova.virt.firewall.NoopFirewallDriver")
-        xml = self._get_instance_xml(d, vif)
-        node = self._get_node(xml)
-        self._assertTypeAndMacEquals(node, "ethernet", "target", "dev",
-                                     vif, vif['devname'])
-
     def _check_ovs_virtualport_driver(self, d, vif, want_iface_id):
         self.flags(firewall_driver="nova.virt.firewall.NoopFirewallDriver")
         xml = self._get_instance_xml(d, vif)
@@ -1121,41 +981,6 @@ class LibvirtVifTestCase(test.NoDBTestCase):
                                            self.vif_ovs,
                                            want_iface_id)
 
-    def test_generic_ivs_virtualport_driver(self):
-        d = vif.LibvirtGenericVIFDriver()
-        want_iface_id = self.vif_ivs['ovs_interfaceid']
-        self._check_ivs_virtualport_driver(d,
-                                           self.vif_ivs,
-                                           want_iface_id)
-
-    def test_ivs_plug_with_nova_firewall(self):
-        d = vif.LibvirtGenericVIFDriver()
-        br_want = "qbr" + self.vif_ivs['id']
-        br_want = br_want[:network_model.NIC_NAME_LEN]
-        xml = self._get_instance_xml(d, self.vif_ivs)
-        node = self._get_node(xml)
-        self._assertTypeAndMacEquals(node, "bridge", "source", "bridge",
-                                     self.vif_ivs, br_want, 1)
-
-    def test_ivs_plug_with_port_filter_direct_no_nova_firewall(self):
-        d = vif.LibvirtGenericVIFDriver()
-        br_want = "qbr" + self.vif_ivs_hybrid['id']
-        br_want = br_want[:network_model.NIC_NAME_LEN]
-        self.flags(firewall_driver="nova.virt.firewall.NoopFirewallDriver")
-        xml = self._get_instance_xml(d, self.vif_ivs_hybrid)
-        node = self._get_node(xml)
-        self._assertTypeAndMacEquals(node, "bridge", "source", "bridge",
-                                     self.vif_ivs_hybrid, br_want, 0)
-
-    def test_ivs_plug_with_port_hybrid_no_nova_firewall(self):
-        d = vif.LibvirtGenericVIFDriver()
-        br_want = self.vif_ivs_filter_cap['devname']
-        self.flags(firewall_driver="nova.virt.firewall.NoopFirewallDriver")
-        xml = self._get_instance_xml(d, self.vif_ivs_filter_cap)
-        node = self._get_node(xml)
-        self._assertTypeAndMacEquals(node, "ethernet", "target", "dev",
-                                     self.vif_ivs_filter_cap, br_want, 0)
-
     def test_direct_plug_with_port_filter_cap_no_nova_firewall(self):
         d = vif.LibvirtGenericVIFDriver()
         br_want = self.vif_midonet['devname']
@@ -1177,14 +1002,6 @@ class LibvirtVifTestCase(test.NoDBTestCase):
         br_want = br_want[:network_model.NIC_NAME_LEN]
         self._check_neutron_hybrid_driver(d,
                                           self.vif_ovs,
-                                          br_want)
-
-    def test_ivs_hybrid_driver(self):
-        d = vif.LibvirtGenericVIFDriver()
-        br_want = "qbr" + self.vif_ivs['id']
-        br_want = br_want[:network_model.NIC_NAME_LEN]
-        self._check_neutron_hybrid_driver(d,
-                                          self.vif_ivs,
                                           br_want)
 
     def test_ib_hostdev_driver(self):
@@ -1339,15 +1156,6 @@ class LibvirtVifTestCase(test.NoDBTestCase):
         d = vif.LibvirtGenericVIFDriver()
         d.plug(self.instance, self.vif_macvtap_flat)
         self.assertFalse(ensure_vlan_mock.called)
-
-    def test_generic_iovisor_driver(self):
-        d = vif.LibvirtGenericVIFDriver()
-        self.flags(firewall_driver="nova.virt.firewall.NoopFirewallDriver")
-        br_want = self.vif_ivs['devname']
-        xml = self._get_instance_xml(d, self.vif_ivs)
-        node = self._get_node(xml)
-        self._assertTypeAndMacEquals(node, "ethernet", "target", "dev",
-                                     self.vif_ivs, br_want)
 
     def test_generic_8021qbg_driver(self):
         d = vif.LibvirtGenericVIFDriver()

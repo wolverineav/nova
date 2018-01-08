@@ -973,7 +973,10 @@ class OSVIFUtilTestCase(test.NoDBTestCase):
 
         actual = os_vif_util.nova_to_osvif_vif(vif)
 
-        self.assertIsNone(actual)
+        expected_vif_name = ("%s%s" % ('nic', vif['id']))[:14]
+
+        self.assertEqual('VIFGeneric', type(actual).__name__)
+        self.assertEqual(expected_vif_name, actual.vif_name)
 
     def test_nova_to_osvif_vif_unknown(self):
         vif = model.VIF(
